@@ -43,7 +43,7 @@ class FaceTracker:
     def __init__(self,
                  min_detection_confidence=0.5,
                  min_tracking_confidence=0.5,
-                 enable_pose=True):
+                 enable_pose=False):
         self.enable_pose = enable_pose
 
         self.face_mesh = mp.solutions.face_mesh.FaceMesh(
