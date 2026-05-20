@@ -25,6 +25,8 @@ from blink_engine import BlinkEngine
 from motion_engine import MotionEngine
 from hrv_engine import HRVEngine
 from arousal_fusion import ArousalFusion
+import os
+os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
