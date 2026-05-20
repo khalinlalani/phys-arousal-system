@@ -1,6 +1,7 @@
 """
 streamlit_app.py
-----------------
+---------------
+-
 Physiological Arousal Monitor — Streamlit web app.
 Uses streamlit-webrtc for live browser webcam access.
 
@@ -340,18 +341,7 @@ st.markdown("""
 
 col_feed, col_mid, col_right = st.columns([2.2, 1.4, 1.4])
 
-# Get latest results from video processor
-_default_snap = {
-    "hr": None, "br": None, "hrv": None, "blink": None, "motion": None,
-    "arousal": None, "phase": "calibrating", "cal_progress": 0.0,
-    "face_found": False, "hr_q": 0.0, "br_q": 0.0,
-    "hr_hist": [], "br_hist": [], "arousal_hist": [],
-}
-if ctx.video_processor is not None:
-    with ctx.video_processor._lock:
-        snap = dict(ctx.video_processor.result)
-else:
-    snap = _default_snap
+# snap defined after ctx below
 
 # ── Left: webcam ───────────────────────────────────────────────────────────────
 with col_feed:
@@ -385,6 +375,20 @@ with col_feed:
         if ctx.video_processor is not None:
             ctx.video_processor.fusion.reset()
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+# Get latest results from video processor
+_default_snap = {
+    "hr": None, "br": None, "hrv": None, "blink": None, "motion": None,
+    "arousal": None, "phase": "calibrating", "cal_progress": 0.0,
+    "face_found": False, "hr_q": 0.0, "br_q": 0.0,
+    "hr_hist": [], "br_hist": [], "arousal_hist": [],
+}
+if ctx.video_processor is not None:
+    with ctx.video_processor._lock:
+        snap = dict(ctx.video_processor.result)
+else:
+    snap = _default_snap
 
 # ── Middle: arousal score + top 3 metrics ─────────────────────────────────────
 with col_mid:
