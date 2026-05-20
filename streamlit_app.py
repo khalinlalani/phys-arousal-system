@@ -377,7 +377,8 @@ with col_feed:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-# Get latest results from video processor
+
+# Read latest data from processor
 _default_snap = {
     "hr": None, "br": None, "hrv": None, "blink": None, "motion": None,
     "arousal": None, "phase": "calibrating", "cal_progress": 0.0,
@@ -385,8 +386,11 @@ _default_snap = {
     "hr_hist": [], "br_hist": [], "arousal_hist": [],
 }
 if ctx.video_processor is not None:
-    with ctx.video_processor._lock:
-        snap = dict(ctx.video_processor.result)
+    try:
+        with ctx.video_processor._lock:
+            snap = dict(ctx.video_processor.result)
+    except Exception:
+        snap = _default_snap
 else:
     snap = _default_snap
 
