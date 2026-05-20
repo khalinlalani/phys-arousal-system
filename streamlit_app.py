@@ -241,3 +241,5 @@ with col_right:
         st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#2a4a5a;padding:1rem 0;text-align:center;">Warming up...</div>', unsafe_allow_html=True)
 
     st.markdown('<div style="margin-top:1.2rem;padding:0.8rem;border:1px solid #1a2a3a;border-radius:4px;"><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.55rem;letter-spacing:0.2em;color:#2a4a5a;text-transform:uppercase;margin-bottom:0.5rem;">How it works</div><div style="font-size:0.75rem;color:#4a6a7a;line-height:1.5;">5 signals z-scored against your 90s calm baseline, weighted into a single arousal index.<br><br>No wearables. No contact. Just your webcam.</div></div>', unsafe_allow_html=True)
+time.sleep(1)
+st.rerun()
