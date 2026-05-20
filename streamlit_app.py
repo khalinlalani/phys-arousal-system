@@ -25,8 +25,6 @@ from blink_engine import BlinkEngine
 from motion_engine import MotionEngine
 from hrv_engine import HRVEngine
 from arousal_fusion import ArousalFusion
-import os
-os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -215,71 +213,40 @@ RTC_CONFIG = RTCConfiguration({
     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
 })
 
-# ── Shared state (thread-safe, lives outside session_state) ───────────────────
-class SharedState:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self.hr = None
-        self.br = None
-        self.hrv = None
-        self.blink = None
-        self.motion = None
-        self.arousal = None
-        self.phase = "calibrating"
-        self.cal_progress = 0.0
-        self.face_found = False
-        self.hr_q = 0.0
-        self.br_q = 0.0
-        self.hr_hist = deque(maxlen=HISTORY_LEN)
-        self.br_hist = deque(maxlen=HISTORY_LEN)
-        self.arousal_hist = deque(maxlen=HISTORY_LEN)
-        self.reset_requested = False
+# ── Result container (stored on processor instance, read via ctx.video_processor) ──
 
-    def update(self, **kwargs):
-        with self._lock:
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-    def snapshot(self):
-        with self._lock:
-            return {
-                "hr": self.hr, "br": self.br, "hrv": self.hrv,
-                "blink": self.blink, "motion": self.motion,
-                "arousal": self.arousal, "phase": self.phase,
-                "cal_progress": self.cal_progress,
-                "face_found": self.face_found,
-                "hr_q": self.hr_q, "br_q": self.br_q,
-                "hr_hist": list(self.hr_hist),
-                "br_hist": list(self.br_hist),
-                "arousal_hist": list(self.arousal_hist),
-            }
-
-# One shared state object per app session
-if "shared" not in st.session_state:
-    st.session_state.shared = SharedState()
-
-shared = st.session_state.shared
+HISTORY_LEN = 150
 
 # ── Video processor ────────────────────────────────────────────────────────────
 class ArousalProcessor(VideoProcessorBase):
     def __init__(self):
-        self.tracker = FaceTracker()
+        import os
+        os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
+        self.tracker = FaceTracker(enable_pose=False)
         self.rppg = RPPGEngine()
         self.breathing = BreathingEngine()
         self.blink = BlinkEngine()
         self.motion = MotionEngine()
         self.hrv = HRVEngine()
         self.fusion = ArousalFusion(calibration_seconds=CALIBRATION_SECONDS)
-        self._last_push = 0.0
+        self._last_update = 0.0
+        self._lock = threading.Lock()
+        # Results stored here, read by main thread via ctx.video_processor
+        self.result = {
+            "hr": None, "br": None, "hrv": None,
+            "blink": None, "motion": None,
+            "arousal": None, "phase": "calibrating",
+            "cal_progress": 0.0, "face_found": False,
+            "hr_q": 0.0, "br_q": 0.0,
+            "hr_hist": [], "br_hist": [], "arousal_hist": [],
+        }
+        self._hr_hist = deque(maxlen=HISTORY_LEN)
+        self._br_hist = deque(maxlen=HISTORY_LEN)
+        self._arousal_hist = deque(maxlen=HISTORY_LEN)
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
-
-        # Check for reset request
-        if shared.reset_requested:
-            self.fusion.reset()
-            shared.update(reset_requested=False)
 
         tdata = self.tracker.update(img)
         rppg_out = self.rppg.update(img, tdata)
@@ -298,34 +265,37 @@ class ArousalProcessor(VideoProcessorBase):
             "blink_rate_bpm": blink_out.get("blink_rate_bpm"),
         })
 
-        # Push to shared state ~3x/sec
         now = time.time()
-        if now - self._last_push > 0.33:
-            self._last_push = now
+        if now - self._last_update > 0.33:
+            self._last_update = now
             hr = rppg_out.get("bpm")
             br = br_out.get("brpm")
             arousal = fusion_state.get("arousal_score")
+            if hr is not None:
+                self._hr_hist.append(hr)
+            if br is not None:
+                self._br_hist.append(br)
+            if arousal is not None:
+                self._arousal_hist.append(arousal)
+            with self._lock:
+                self.result = {
+                    "hr": hr,
+                    "br": br,
+                    "hrv": hrv_out.get("rmssd_ms"),
+                    "blink": blink_out.get("blink_rate_bpm"),
+                    "motion": motion_out.get("motion_score"),
+                    "arousal": arousal,
+                    "phase": fusion_state["phase"],
+                    "cal_progress": fusion_state.get("calibration_progress", 0.0),
+                    "face_found": tdata["face_found"],
+                    "hr_q": rppg_out.get("signal_quality") or 0.0,
+                    "br_q": br_out.get("signal_quality") or 0.0,
+                    "hr_hist": list(self._hr_hist),
+                    "br_hist": list(self._br_hist),
+                    "arousal_hist": list(self._arousal_hist),
+                }
 
-            with shared._lock:
-                shared.hr = hr
-                shared.br = br
-                shared.hrv = hrv_out.get("rmssd_ms")
-                shared.blink = blink_out.get("blink_rate_bpm")
-                shared.motion = motion_out.get("motion_score")
-                shared.arousal = arousal
-                shared.phase = fusion_state["phase"]
-                shared.cal_progress = fusion_state.get("calibration_progress", 0.0)
-                shared.face_found = tdata["face_found"]
-                shared.hr_q = rppg_out.get("signal_quality") or 0.0
-                shared.br_q = br_out.get("signal_quality") or 0.0
-                if hr is not None:
-                    shared.hr_hist.append(hr)
-                if br is not None:
-                    shared.br_hist.append(br)
-                if arousal is not None:
-                    shared.arousal_hist.append(arousal)
-
-        # Draw ROI overlays on video
+        # Draw ROI overlays
         if tdata.get("forehead_roi"):
             x, y, w, h = tdata["forehead_roi"]
             cv2.rectangle(img, (x, y), (x+w, y+h), (0, 229, 255), 1)
@@ -338,7 +308,6 @@ class ArousalProcessor(VideoProcessorBase):
             cv2.polylines(img, [tdata["right_eye_pts"]], True, (0, 200, 255), 1)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def fmt(v, decimals=1):
@@ -371,8 +340,18 @@ st.markdown("""
 
 col_feed, col_mid, col_right = st.columns([2.2, 1.4, 1.4])
 
-# Snapshot current state for rendering
-snap = shared.snapshot()
+# Get latest results from video processor
+_default_snap = {
+    "hr": None, "br": None, "hrv": None, "blink": None, "motion": None,
+    "arousal": None, "phase": "calibrating", "cal_progress": 0.0,
+    "face_found": False, "hr_q": 0.0, "br_q": 0.0,
+    "hr_hist": [], "br_hist": [], "arousal_hist": [],
+}
+if ctx.video_processor is not None:
+    with ctx.video_processor._lock:
+        snap = dict(ctx.video_processor.result)
+else:
+    snap = _default_snap
 
 # ── Left: webcam ───────────────────────────────────────────────────────────────
 with col_feed:
@@ -387,7 +366,7 @@ with col_feed:
         video_processor_factory=ArousalProcessor,
         rtc_configuration=RTC_CONFIG,
         media_stream_constraints={"video": {"deviceId": {"ideal": str(device_id)}}, "audio": False},
-        async_processing=False,
+        async_processing=True,
     )
 
     face_dot = "green" if snap["face_found"] else "red"
@@ -403,7 +382,8 @@ with col_feed:
 
     st.markdown("<div style='margin-top:0.8rem;'>", unsafe_allow_html=True)
     if st.button("↺  Reset Baseline"):
-        shared.update(reset_requested=True)
+        if ctx.video_processor is not None:
+            ctx.video_processor.fusion.reset()
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Middle: arousal score + top 3 metrics ─────────────────────────────────────
