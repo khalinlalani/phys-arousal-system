@@ -399,3 +399,8 @@ This is a research-grade tool, not a medical device.
         st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.55rem;color:#2a4a5a;text-align:center;margin-top:0.3rem;">Opens in browser · Print to PDF with Ctrl+P</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#2a4a5a;text-align:center;padding:0.5rem 0;">Available after calibration completes</div>', unsafe_allow_html=True)
+
+# Auto-refresh only when stream is running
+if ctx.video_processor is not None:
+    time.sleep(1)
+    st.rerun()
