@@ -279,10 +279,15 @@ with col_mid:
     score_txt = fmt(score, 1)
 
     if snap["phase"] == "calibrating":
-        # Use wall clock from session_state so reruns don't reset the timer
-        if st.session_state.cal_start_time is None:
-            st.session_state.cal_start_time = time.time()
-        elapsed = time.time() - st.session_state.cal_start_time
+        # Only start timer when stream is actually running
+        stream_active = ctx.video_processor is not None
+        if stream_active:
+            if st.session_state.cal_start_time is None:
+                st.session_state.cal_start_time = time.time()
+            elapsed = time.time() - st.session_state.cal_start_time
+        else:
+            st.session_state.cal_start_time = None
+            elapsed = 0
         prog = min(1.0, elapsed / CALIBRATION_SECONDS)
         remaining = max(0, int(CALIBRATION_SECONDS - elapsed))
         st.markdown(f'<div style="background:#0a1520;border:1px solid #1a2a3a;border-radius:4px;padding:1rem 1.2rem;margin-bottom:1rem;"><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.65rem;letter-spacing:0.25em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.5rem;">▶ Calibrating — {remaining}s remaining</div><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.6rem;color:#2a5a6a;">Sit still · breathe normally</div></div>', unsafe_allow_html=True)
@@ -317,3 +322,80 @@ with col_right:
         st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#2a4a5a;padding:1rem 0;text-align:center;">Warming up...</div>', unsafe_allow_html=True)
 
     st.markdown('<div style="margin-top:1.2rem;padding:0.8rem;border:1px solid #1a2a3a;border-radius:4px;"><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.55rem;letter-spacing:0.2em;color:#2a4a5a;text-transform:uppercase;margin-bottom:0.5rem;">How it works</div><div style="font-size:0.75rem;color:#4a6a7a;line-height:1.5;">5 signals z-scored against your 90s calm baseline, weighted into a single arousal index.<br><br>No wearables. No contact. Just your webcam.</div></div>', unsafe_allow_html=True)
+
+    # ── PDF Report ────────────────────────────────────────────────────────────
+    st.markdown('<div class="section-header" style="margin-top:1.2rem;">Session Report</div>', unsafe_allow_html=True)
+
+    def generate_report():
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        hr_avg = f"{sum(snap['hr_hist'])/len(snap['hr_hist']):.1f} BPM" if snap["hr_hist"] else "No data"
+        br_avg = f"{sum(snap['br_hist'])/len(snap['br_hist']):.1f} /min" if snap["br_hist"] else "No data"
+        arousal_avg = f"{sum(snap['arousal_hist'])/len(snap['arousal_hist']):.1f} / 100" if snap["arousal_hist"] else "No data"
+        arousal_peak = f"{max(snap['arousal_hist']):.1f} / 100" if snap["arousal_hist"] else "No data"
+        hrv_val = f"{min(snap['hrv'], 150):.1f} ms" if snap["hrv"] else "No data"
+        blink_val = f"{snap['blink']:.1f} /min" if snap["blink"] else "No data"
+        motion_val = f"{snap['motion']:.2f}" if snap["motion"] else "No data"
+        phase = "Live" if snap["phase"] == "live" else "Calibrating"
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #080c10; color: #c8d8e8; padding: 40px; margin: 0; }}
+  h1 {{ font-family: monospace; color: #00e5ff; letter-spacing: 0.2em; text-transform: uppercase; font-size: 1.4rem; border-bottom: 1px solid #1a2a3a; padding-bottom: 12px; }}
+  h2 {{ font-family: monospace; color: #4a7a8a; font-size: 0.65rem; letter-spacing: 0.25em; text-transform: uppercase; margin-top: 28px; margin-bottom: 10px; }}
+  .meta {{ font-size: 0.75rem; color: #4a6a7a; margin-bottom: 24px; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  td {{ padding: 10px 12px; border-bottom: 1px solid #1a2a3a; font-size: 0.9rem; }}
+  td:first-child {{ color: #4a6a7a; font-family: monospace; font-size: 0.75rem; letter-spacing: 0.1em; width: 40%; }}
+  td:last-child {{ color: #c8d8e8; font-weight: 600; }}
+  .arousal-big {{ font-family: monospace; font-size: 3rem; color: #00e5ff; text-align: center; padding: 20px; border: 1px solid #1a3a4a; border-radius: 4px; margin: 12px 0; background: #0d1f2d; }}
+  .disclaimer {{ margin-top: 32px; padding: 12px; border: 1px solid #1a2a3a; border-radius: 4px; font-size: 0.75rem; color: #4a6a7a; line-height: 1.6; }}
+</style>
+</head>
+<body>
+<h1>⬡ Physiological Arousal Monitor</h1>
+<div class="meta">Session Report &nbsp;·&nbsp; Generated {now} &nbsp;·&nbsp; Status: {phase}</div>
+
+<h2>Arousal Score</h2>
+<div class="arousal-big">{arousal_avg}</div>
+
+<h2>Session Averages</h2>
+<table>
+<tr><td>Heart Rate</td><td>{hr_avg}</td></tr>
+<tr><td>Breathing Rate</td><td>{br_avg}</td></tr>
+<tr><td>HRV · RMSSD</td><td>{hrv_val}</td></tr>
+<tr><td>Blink Rate</td><td>{blink_val}</td></tr>
+<tr><td>Motion Score</td><td>{motion_val}</td></tr>
+</table>
+
+<h2>Arousal Summary</h2>
+<table>
+<tr><td>Average Arousal</td><td>{arousal_avg}</td></tr>
+<tr><td>Peak Arousal</td><td>{arousal_peak}</td></tr>
+</table>
+
+<div class="disclaimer">
+This report is generated from a single webcam session. Values represent averages over the live session window.
+Arousal score is relative to your personal 90-second calm baseline — not an absolute measure.
+This is a research-grade tool, not a medical device.
+<br><br>phys-arousal-monitor.streamlit.app
+</div>
+</body>
+</html>"""
+        return html
+
+    if snap["phase"] == "live" and snap["arousal_hist"]:
+        report_html = generate_report()
+        st.download_button(
+            label="⬇  Download Session Report",
+            data=report_html.encode("utf-8"),
+            file_name="arousal_report.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+        st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.55rem;color:#2a4a5a;text-align:center;margin-top:0.3rem;">Opens in browser · Print to PDF with Ctrl+P</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#2a4a5a;text-align:center;padding:0.5rem 0;">Available after calibration completes</div>', unsafe_allow_html=True)
