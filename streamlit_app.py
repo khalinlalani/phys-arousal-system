@@ -23,6 +23,10 @@ from arousal_fusion import ArousalFusion
 
 os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
 
+# Track calibration start time in session state so reruns don't reset it
+if "cal_start_time" not in st.session_state:
+    st.session_state.cal_start_time = None
+
 st.set_page_config(page_title="Arousal Monitor", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -70,6 +74,7 @@ class ArousalProcessor(VideoProcessorBase):
         self.motion = MotionEngine()
         self.hrv = HRVEngine()
         self.fusion = ArousalFusion(calibration_seconds=CALIBRATION_SECONDS)
+        self._start_time = time.time()
         self._last_update = 0.0
         self._lock = threading.Lock()
         self._hr_hist = deque(maxlen=HISTORY_LEN)
@@ -152,6 +157,71 @@ def metric_card(css_class, label, value, unit, color):
 # ── Title ──────────────────────────────────────────────────────────────────────
 st.markdown('<div class="title-block"><h1>⬡ Physiological Arousal Monitor</h1><p>Contactless biometric sensing via webcam</p></div>', unsafe_allow_html=True)
 
+# ── Instructions expander ──────────────────────────────────────────────────────
+with st.expander("📖  How to use this — read before starting", expanded=False):
+    st.markdown("""
+<div style="font-family:'Rajdhani',sans-serif;color:#c8d8e8;line-height:1.7;font-size:0.95rem;">
+
+<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;letter-spacing:0.2em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.8rem;">What is this?</div>
+
+This system detects your physiological arousal level in real time using only your webcam — no wearables, no sensors. It tracks 5 signals simultaneously and combines them into a single <b style="color:#00e5ff;">Arousal Score (0–100)</b> that reflects how activated or stressed your nervous system is relative to your own calm baseline.
+
+<br><br>
+
+<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;letter-spacing:0.2em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.8rem;">The 5 signals</div>
+
+<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+<tr style="border-bottom:1px solid #1a2a3a;">
+<td style="padding:0.4rem 0.8rem 0.4rem 0;color:#00e5ff;font-family:'Share Tech Mono',monospace;font-size:0.7rem;">HEART RATE</td>
+<td style="padding:0.4rem 0;color:#8a9ab0;">Green-channel color changes in your forehead skin, caused by blood pulsing through capillaries</td>
+</tr>
+<tr style="border-bottom:1px solid #1a2a3a;">
+<td style="padding:0.4rem 0.8rem 0.4rem 0;color:#00ff88;font-family:'Share Tech Mono',monospace;font-size:0.7rem;">BREATHING</td>
+<td style="padding:0.4rem 0;color:#8a9ab0;">Brightness changes in the chest/shoulder region as it rises and falls</td>
+</tr>
+<tr style="border-bottom:1px solid #1a2a3a;">
+<td style="padding:0.4rem 0.8rem 0.4rem 0;color:#ff6b6b;font-family:'Share Tech Mono',monospace;font-size:0.7rem;">HRV</td>
+<td style="padding:0.4rem 0;color:#8a9ab0;">Variation between individual heartbeat intervals — lower variability = higher stress</td>
+</tr>
+<tr style="border-bottom:1px solid #1a2a3a;">
+<td style="padding:0.4rem 0.8rem 0.4rem 0;color:#ffd93d;font-family:'Share Tech Mono',monospace;font-size:0.7rem;">BLINK RATE</td>
+<td style="padding:0.4rem 0;color:#8a9ab0;">Blinks per minute via Eye Aspect Ratio — stress and cognitive load affect blink frequency</td>
+</tr>
+<tr>
+<td style="padding:0.4rem 0.8rem 0.4rem 0;color:#c77dff;font-family:'Share Tech Mono',monospace;font-size:0.7rem;">MOTION</td>
+<td style="padding:0.4rem 0;color:#8a9ab0;">Head jitter and facial movement — fidgeting and restlessness are real arousal indicators</td>
+</tr>
+</table>
+
+<br>
+
+<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;letter-spacing:0.2em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.8rem;">How the score works</div>
+
+The first <b style="color:#c8d8e8;">90 seconds</b> are a calibration phase. Sit still and breathe normally. The system records your personal baseline for each signal. After calibration, every reading is converted to a z-score — how far above or below YOUR normal is this right now? These are weighted and combined into the 0–100 arousal score. The score is relative to you, not absolute.
+
+<br><br>
+
+<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;letter-spacing:0.2em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.8rem;">Camera setup — important</div>
+
+For best results:
+
+<ul style="color:#8a9ab0;margin-top:0.4rem;padding-left:1.2rem;">
+<li><b style="color:#c8d8e8;">Sit 40–70cm</b> from the camera — close enough for the face to be clearly visible</li>
+<li><b style="color:#c8d8e8;">Face the light source</b> — a window or lamp in front of you, not behind. Backlit faces break the heart rate signal</li>
+<li><b style="color:#c8d8e8;">Show your upper chest</b> — tilt the camera slightly down or sit back so shoulders are visible. This is needed for breathing detection</li>
+<li><b style="color:#c8d8e8;">Stay relatively still</b> during calibration — movement during the first 90s skews your baseline</li>
+<li><b style="color:#c8d8e8;">Use Chrome</b> for best WebRTC camera performance</li>
+</ul>
+
+<br>
+
+<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;letter-spacing:0.2em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.8rem;">Limitations</div>
+
+<span style="color:#4a6a7a;">This is a research-grade demo, not a medical device. Webcam signals are noisier than contact sensors. Results are most meaningful within a single session, compared to your own baseline. Lighting and camera quality affect accuracy significantly.</span>
+
+</div>
+""", unsafe_allow_html=True)
+
 # ── Camera selector + webrtc (MUST be defined before columns use snap) ─────────
 camera_options = {"Default camera": 0, "Camera 1": 1, "Camera 2": 2}
 selected = st.selectbox("Select camera (stop stream first to switch)", list(camera_options.keys()), index=0)
@@ -200,6 +270,7 @@ with col_feed:
     if st.button("↺  Reset Baseline"):
         if ctx.video_processor is not None:
             ctx.video_processor.fusion.reset()
+        st.session_state.cal_start_time = time.time()
 
 with col_mid:
     st.markdown('<div class="section-header">Arousal Score</div>', unsafe_allow_html=True)
@@ -208,8 +279,12 @@ with col_mid:
     score_txt = fmt(score, 1)
 
     if snap["phase"] == "calibrating":
-        prog = snap["cal_progress"]
-        remaining = int(CALIBRATION_SECONDS * (1 - prog))
+        # Use wall clock from session_state so reruns don't reset the timer
+        if st.session_state.cal_start_time is None:
+            st.session_state.cal_start_time = time.time()
+        elapsed = time.time() - st.session_state.cal_start_time
+        prog = min(1.0, elapsed / CALIBRATION_SECONDS)
+        remaining = max(0, int(CALIBRATION_SECONDS - elapsed))
         st.markdown(f'<div style="background:#0a1520;border:1px solid #1a2a3a;border-radius:4px;padding:1rem 1.2rem;margin-bottom:1rem;"><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.65rem;letter-spacing:0.25em;color:#00e5ff;text-transform:uppercase;margin-bottom:0.5rem;">▶ Calibrating — {remaining}s remaining</div><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.6rem;color:#2a5a6a;">Sit still · breathe normally</div></div>', unsafe_allow_html=True)
         st.progress(float(prog))
     else:
@@ -221,7 +296,8 @@ with col_mid:
     st.markdown('<div class="section-header" style="margin-top:1rem;">Signals</div>', unsafe_allow_html=True)
     st.markdown(metric_card("hr", "Heart Rate", fmt(snap["hr"]), "BPM", "#00e5ff"), unsafe_allow_html=True)
     st.markdown(metric_card("br", "Breathing", fmt(snap["br"]), "Breaths / min", "#00ff88"), unsafe_allow_html=True)
-    st.markdown(metric_card("hrv", "HRV · RMSSD", fmt(snap["hrv"]), "ms", "#ff6b6b"), unsafe_allow_html=True)
+    hrv_display = min(snap["hrv"], 150) if snap["hrv"] is not None else None
+    st.markdown(metric_card("hrv", "HRV · RMSSD", fmt(hrv_display), "ms", "#ff6b6b"), unsafe_allow_html=True)
 
 with col_right:
     st.markdown('<div class="section-header">Behavioral</div>', unsafe_allow_html=True)
@@ -241,5 +317,3 @@ with col_right:
         st.markdown('<div style="font-family:Share Tech Mono,monospace;font-size:0.6rem;color:#2a4a5a;padding:1rem 0;text-align:center;">Warming up...</div>', unsafe_allow_html=True)
 
     st.markdown('<div style="margin-top:1.2rem;padding:0.8rem;border:1px solid #1a2a3a;border-radius:4px;"><div style="font-family:\'Share Tech Mono\',monospace;font-size:0.55rem;letter-spacing:0.2em;color:#2a4a5a;text-transform:uppercase;margin-bottom:0.5rem;">How it works</div><div style="font-size:0.75rem;color:#4a6a7a;line-height:1.5;">5 signals z-scored against your 90s calm baseline, weighted into a single arousal index.<br><br>No wearables. No contact. Just your webcam.</div></div>', unsafe_allow_html=True)
-time.sleep(1)
-st.rerun()
