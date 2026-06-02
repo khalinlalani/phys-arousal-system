@@ -155,7 +155,7 @@ def metric_card(css_class, label, value, unit, color):
 
 
 # ── Title ──────────────────────────────────────────────────────────────────────
-st.markdown('<div class="title-block"><h1>⬡ Physiological Arousal Monitor</h1><p>Contactless biometric sensing via webcam</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="title-block"><h1>⬡ Physiological State Monitor</h1><p>Contactless biometric sensing via webcam</p></div>', unsafe_allow_html=True)
 
 # ── Instructions expander ──────────────────────────────────────────────────────
 with st.expander("📖  How to use this — read before starting", expanded=False):
